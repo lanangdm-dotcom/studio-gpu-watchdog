@@ -6,8 +6,7 @@ name: GPU pod watchdog
 # 10 minutes; after a sustained outage it deletes every pod whose name carries our prefix and
 # opens an issue so the owner is told. It never creates anything.
 #
-# Secrets (repo settings → Secrets): RUNPOD_API_KEY (the account key; stays encrypted here),
-# HEALTHCHECK_URL (optional healthchecks.io ping URL: silence of the watchdog itself alerts the owner).
+# Secrets (repo settings → Secrets): RUNPOD_API_KEY (the account key; stays encrypted here).
 # Variables (repo settings → Variables): APP_URL, POD_NAME_PREFIX (default studio-worker-),
 # WATCHDOG_ENABLED (true/false), OUTAGE_MINUTES (default 15).
 
@@ -110,16 +109,3 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             ].join("\n");
             await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [] });
-
-      - name: Tell the dead-man switch this run happened (healthchecks.io)
-        if: always()
-        shell: bash
-        env:
-          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          # Optional: without the secret this step does nothing. The URL is a secret because anyone
-          # who knows it could fake "alive" pings and hide a dead watchdog.
-          if [ -z "${HEALTHCHECK_URL:-}" ]; then echo "no HEALTHCHECK_URL set: skipped"; exit 0; fi
-          suffix=""; [ "$JOB_STATUS" = "success" ] || suffix="/fail"
-          curl -fsS -m 10 --retry 3 -o /dev/null "${HEALTHCHECK_URL}${suffix}" || echo "ping failed (not fatal)"
