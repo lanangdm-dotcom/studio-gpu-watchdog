@@ -1,0 +1,108 @@
+name: GPU pod watchdog
+
+# Backstop that lives OUTSIDE the studio VPS: pods hold no Runpod key (they cannot delete
+# themselves), the autoscaler on the VPS deletes them. If the VPS or the autoscaler is down for
+# long, nothing would stop the billing. This job checks the app from GitHub's runners every
+# 10 minutes; after a sustained outage it deletes every pod whose name carries our prefix and
+# opens an issue so the owner is told. It never creates anything.
+#
+# Secrets (repo settings → Secrets): RUNPOD_API_KEY (the account key; stays encrypted here).
+# Variables (repo settings → Variables): APP_URL, POD_NAME_PREFIX (default studio-worker-),
+# WATCHDOG_ENABLED (true/false), OUTAGE_MINUTES (default 15).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Delete the pods now even if the app answers (emergency stop)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://app.sekalibanyak.com' }}
+      POD_NAME_PREFIX: ${{ vars.POD_NAME_PREFIX || 'studio-worker-' }}
+      OUTAGE_MINUTES: ${{ vars.OUTAGE_MINUTES || '15' }}
+      WATCHDOG_ENABLED: ${{ vars.WATCHDOG_ENABLED || 'true' }}
+      FORCE: ${{ inputs.force && 'true' || 'false' }}
+    steps:
+      - name: Probe the app, then the autoscaler heartbeat
+        id: probe
+        shell: bash
+        run: |
+          set -u
+          if [ "$WATCHDOG_ENABLED" != "true" ]; then
+            echo "watchdog switched off (WATCHDOG_ENABLED=$WATCHDOG_ENABLED)"; echo "act=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$FORCE" = "true" ]; then
+            echo "forced by hand"; echo "act=yes" >> "$GITHUB_OUTPUT"; echo "why=dipaksa manual (workflow_dispatch force)" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          probe() {
+            # 200 = app up AND autoscaler heartbeat fresh (the endpoint answers 503 when stale).
+            curl -fsS -m 20 -o /dev/null -w '%{http_code}' "$APP_URL/api/healthz/autoscaler" 2>/dev/null || echo "000"
+          }
+          # Sustained outage only: probe, wait OUTAGE_MINUTES, probe again. A flapping or short
+          # outage (deploy restart, brief network blip) must never cost a working fleet.
+          first="$(probe)"; echo "first probe: $first"
+          if [ "$first" = "200" ]; then echo "act=no" >> "$GITHUB_OUTPUT"; exit 0; fi
+          sleep "$(( OUTAGE_MINUTES * 60 ))"
+          second="$(probe)"; echo "second probe after ${OUTAGE_MINUTES} min: $second"
+          if [ "$second" = "200" ]; then echo "act=no" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "act=yes" >> "$GITHUB_OUTPUT"
+          echo "why=aplikasi/autoscaler tidak menjawab 200 dua kali berturut (${first} lalu ${second}) selama ${OUTAGE_MINUTES} menit" >> "$GITHUB_OUTPUT"
+
+      - name: Delete every pod with our prefix
+        if: steps.probe.outputs.act == 'yes'
+        id: kill
+        shell: bash
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+        run: |
+          set -u
+          if [ -z "${RUNPOD_API_KEY:-}" ]; then echo "RUNPOD_API_KEY secret missing"; exit 1; fi
+          auth="Authorization: Bearer ${RUNPOD_API_KEY}"
+          list="$(curl -fsS -m 30 -H "$auth" https://rest.runpod.io/v1/pods)" || { echo "list pods failed"; exit 1; }
+          ids="$(printf '%s' "$list" | jq -r --arg p "$POD_NAME_PREFIX" '.[] | select(.name | startswith($p)) | .id')"
+          count=0; failed=0
+          for id in $ids; do
+            case "$id" in *[!A-Za-z0-9_-]*|"") continue ;; esac
+            if curl -fsS -m 30 -X DELETE -H "$auth" "https://rest.runpod.io/v1/pods/$id" >/dev/null; then
+              echo "deleted $id"; count=$((count+1))
+            else
+              echo "DELETE failed for $id"; failed=$((failed+1))
+            fi
+          done
+          echo "deleted=$count" >> "$GITHUB_OUTPUT"; echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          [ "$failed" = 0 ]
+
+      - name: Tell the owner (GitHub issue → e-mail)
+        if: always() && steps.probe.outputs.act == 'yes'
+        uses: actions/github-script@v7
+        env:
+          WHY: ${{ steps.probe.outputs.why }}
+          DELETED: ${{ steps.kill.outputs.deleted || '0' }}
+          FAILED: ${{ steps.kill.outputs.failed || '?' }}
+        with:
+          script: |
+            const title = `Watchdog mematikan pod GPU (${process.env.DELETED} dihapus, ${process.env.FAILED} gagal)`;
+            const body = [
+              `**Sebab:** ${process.env.WHY}`,
+              ``,
+              `Pod Runpod dengan awalan \`${process.env.POD_NAME_PREFIX}\` dihapus oleh watchdog luar VPS supaya tidak menagih tanpa batas.`,
+              `Periksa VPS/autoscaler (\`docker compose ps\`, \`docker compose logs autoscaler\`), lalu biarkan autoscaler membeli pod lagi sendiri saat ada antrean.`,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join("\n");
+            await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [] });
