@@ -6,7 +6,8 @@ name: GPU pod watchdog
 # 10 minutes; after a sustained outage it deletes every pod whose name carries our prefix and
 # opens an issue so the owner is told. It never creates anything.
 #
-# Secrets (repo settings → Secrets): RUNPOD_API_KEY (the account key; stays encrypted here).
+# Secrets (repo settings → Secrets): RUNPOD_API_KEY (the account key; stays encrypted here),
+# HEALTHCHECK_URL (optional healthchecks.io ping URL: silence of the watchdog itself alerts the owner).
 # Variables (repo settings → Variables): APP_URL, POD_NAME_PREFIX (default studio-worker-),
 # WATCHDOG_ENABLED (true/false), OUTAGE_MINUTES (default 15).
 
@@ -20,12 +21,11 @@ on:
   # silent on a new repo until a push-triggered run has happened (manual runs do not count).
   push:
     branches: [main]
+  # Main trigger: an outside cron service (cron-job.org) dispatches this every 10 minutes with a
+  # token that may only run workflows of this repo; GitHub's own schedule above is a bonus (it lags
+  # by hours on this account). No inputs on purpose: a leaked dispatch token can only make the
+  # watchdog CHECK, never force-delete working pods. Emergency stop = Runpod console → Terminate.
   workflow_dispatch:
-    inputs:
-      force:
-        description: "Delete the pods now even if the app answers (emergency stop)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -44,7 +44,6 @@ jobs:
       POD_NAME_PREFIX: ${{ vars.POD_NAME_PREFIX || 'studio-worker-' }}
       OUTAGE_MINUTES: ${{ vars.OUTAGE_MINUTES || '15' }}
       WATCHDOG_ENABLED: ${{ vars.WATCHDOG_ENABLED || 'true' }}
-      FORCE: ${{ inputs.force && 'true' || 'false' }}
     steps:
       - name: Probe the app, then the autoscaler heartbeat
         id: probe
@@ -53,9 +52,6 @@ jobs:
           set -u
           if [ "$WATCHDOG_ENABLED" != "true" ]; then
             echo "watchdog switched off (WATCHDOG_ENABLED=$WATCHDOG_ENABLED)"; echo "act=no" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if [ "$FORCE" = "true" ]; then
-            echo "forced by hand"; echo "act=yes" >> "$GITHUB_OUTPUT"; echo "why=dipaksa manual (workflow_dispatch force)" >> "$GITHUB_OUTPUT"; exit 0
           fi
           probe() {
             # 200 = app up AND autoscaler heartbeat fresh (the endpoint answers 503 when stale).
@@ -113,3 +109,16 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             ].join("\n");
             await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [] });
+
+      - name: Tell the dead-man switch this run happened (healthchecks.io)
+        if: always()
+        shell: bash
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # Optional: without the secret this step does nothing. The URL is a secret because anyone
+          # who knows it could fake "alive" pings and hide a dead watchdog.
+          if [ -z "${HEALTHCHECK_URL:-}" ]; then echo "no HEALTHCHECK_URL set: skipped"; exit 0; fi
+          suffix=""; [ "$JOB_STATUS" = "success" ] || suffix="/fail"
+          curl -fsS -m 10 --retry 3 -o /dev/null "${HEALTHCHECK_URL}${suffix}" || echo "ping failed (not fatal)"

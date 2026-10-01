@@ -20,8 +20,21 @@ saldo habis".
 - **Secret** `RUNPOD_API_KEY` — kunci akun Runpod (terenkripsi oleh GitHub; tidak pernah tampil di log).
 - **Variables**: `APP_URL`, `POD_NAME_PREFIX`, `OUTAGE_MINUTES`, `WATCHDOG_ENABLED` (`false` untuk mematikan).
 
+## Pemicu
+Jadwal bawaan GitHub (`schedule`) di akun ini telat berjam-jam, jadi pemicu utamanya **cron-job.org**
+(akun pemilik) yang tiap 10 menit memanggil:
+`POST https://api.github.com/repos/lanangdm-dotcom/studio-gpu-watchdog/actions/workflows/gpu-watchdog.yml/dispatches`
+dengan header `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, body `{"ref":"main"}`.
+Token = *fine-grained personal access token* hanya untuk repo ini, izin **Actions: Read and write** saja,
+kedaluwarsa 1 tahun (catat tanggalnya). Token hanya ditempel di cron-job.org, tidak di tempat lain.
+Workflow sengaja **tanpa input**: token yang bocor hanya bisa menyuruh watchdog *memeriksa*.
+
+## Satpam diawasi
+Secret opsional `HEALTHCHECK_URL` (healthchecks.io, periode 10 menit + toleransi 20 menit): tiap run
+memberi tanda; bila watchdog diam, pemilik dapat e-mail.
+
 ## Tombol darurat
-Actions → *GPU pod watchdog* → *Run workflow* → centang **force** → semua pod dihapus sekarang.
+Hapus pod langsung di **console Runpod → Pods → Terminate** (atau tombol darurat di aplikasi).
 
 Repo ini publik hanya berisi workflow (tanpa rahasia) karena Actions gratis untuk repo publik.
 
