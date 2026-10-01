@@ -21,10 +21,11 @@ on:
   # silent on a new repo until a push-triggered run has happened (manual runs do not count).
   push:
     branches: [main]
-  # Main trigger: an outside cron service (cron-job.org) dispatches this every 10 minutes with a
-  # token that may only run workflows of this repo; GitHub's own schedule above is a bonus (it lags
-  # by hours on this account). No inputs on purpose: a leaked dispatch token can only make the
-  # watchdog CHECK, never force-delete working pods. Emergency stop = Runpod console → Terminate.
+  # Triggers: GitHub's schedule above (lags by hours on this account, so this is a BONUS backstop,
+  # not a guarantee), pushes, and manual runs. The owner decided (2026-10-02) against outside
+  # services such as cron-job.org. No inputs on purpose: a run can only CHECK, never force-delete
+  # working pods. Emergency stop = Runpod console → Terminate. Planned change (studio-video-ai
+  # docs/RISIKO.md, PR-2): act only when /api/readyz fails, not on a stale autoscaler heartbeat.
   workflow_dispatch:
 
 permissions:

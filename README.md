@@ -21,17 +21,13 @@ saldo habis".
 - **Variables**: `APP_URL`, `POD_NAME_PREFIX`, `OUTAGE_MINUTES`, `WATCHDOG_ENABLED` (`false` untuk mematikan).
 
 ## Pemicu
-Jadwal bawaan GitHub (`schedule`) di akun ini telat berjam-jam, jadi pemicu utamanya **cron-job.org**
-(akun pemilik) yang tiap 10 menit memanggil:
-`POST https://api.github.com/repos/lanangdm-dotcom/studio-gpu-watchdog/actions/workflows/gpu-watchdog.yml/dispatches`
-dengan header `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, body `{"ref":"main"}`.
-Token = *fine-grained personal access token* hanya untuk repo ini, izin **Actions: Read and write** saja,
-kedaluwarsa 1 tahun (catat tanggalnya). Token hanya ditempel di cron-job.org, tidak di tempat lain.
-Workflow sengaja **tanpa input**: token yang bocor hanya bisa menyuruh watchdog *memeriksa*.
-
-## Satpam diawasi
-Secret opsional `HEALTHCHECK_URL` (healthchecks.io, periode 10 menit + toleransi 20 menit): tiap run
-memberi tanda; bila watchdog diam, pemilik dapat e-mail.
+Jadwal bawaan GitHub (`schedule`, tiap 10 menit) **di akun ini telat berjam-jam / belum pernah jalan**,
+jadi watchdog ini hanya **pengaman tambahan**, bukan jaminan. Pemilik memutuskan (2026-10-02) **tidak**
+memakai layanan luar (cron-job.org, healthchecks.io). Pengaman utama ada di aplikasi sendiri — lihat
+`docs/RISIKO.md` bagian "Rencana final" di repo `studio-video-ai`.
+Workflow sengaja **tanpa input**: run apa pun hanya bisa *memeriksa*.
+Rencana (PR-2): bertindak hanya bila `/api/readyz` gagal 2× berjarak 15 menit — bukan karena heartbeat
+autoscaler basi (yang sekarang bisa menghapus pod yang sedang kerja).
 
 ## Tombol darurat
 Hapus pod langsung di **console Runpod → Pods → Terminate** (atau tombol darurat di aplikasi).
