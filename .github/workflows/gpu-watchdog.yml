@@ -24,7 +24,8 @@ on:
   # not a guarantee), pushes, and manual runs. The owner decided (2026-10-02) against outside
   # services such as cron-job.org. No inputs on purpose: a run can only CHECK, never force-delete
   # working pods. Emergency stop = Runpod console → Terminate. Planned change (studio-video-ai
-  # docs/RISIKO.md, PR-2): act only when /api/readyz fails, not on a stale autoscaler heartbeat.
+  # docs/RISIKO.md, PR-2, done 2026-10-02): act only when /api/readyz fails, never on a stale
+  # autoscaler heartbeat (a hung autoscaler with a healthy app must not cost working pods).
   workflow_dispatch:
 
 permissions:
@@ -45,7 +46,7 @@ jobs:
       OUTAGE_MINUTES: ${{ vars.OUTAGE_MINUTES || '15' }}
       WATCHDOG_ENABLED: ${{ vars.WATCHDOG_ENABLED || 'true' }}
     steps:
-      - name: Probe the app, then the autoscaler heartbeat
+      - name: Probe whether the app is up (readyz)
         id: probe
         shell: bash
         run: |
@@ -54,8 +55,10 @@ jobs:
             echo "watchdog switched off (WATCHDOG_ENABLED=$WATCHDOG_ENABLED)"; echo "act=no" >> "$GITHUB_OUTPUT"; exit 0
           fi
           probe() {
-            # 200 = app up AND autoscaler heartbeat fresh (the endpoint answers 503 when stale).
-            curl -fsS -m 20 -o /dev/null -w '%{http_code}' "$APP_URL/api/healthz/autoscaler" 2>/dev/null || echo "000"
+            # 200 = the app and its database answer. Pods cannot claim or deliver without it, so only
+            # a sustained non-200 here means their work is lost anyway and billing must stop. A stale
+            # autoscaler heartbeat is NOT a reason: pods keep working with the app alone.
+            curl -fsS -m 20 -o /dev/null -w '%{http_code}' "$APP_URL/api/readyz" 2>/dev/null || echo "000"
           }
           # Sustained outage only: probe, wait OUTAGE_MINUTES, probe again. A flapping or short
           # outage (deploy restart, brief network blip) must never cost a working fleet.

@@ -6,8 +6,8 @@ Pod GPU tidak memegang kunci Runpod (keputusan pemilik 2026-10-01) — yang meng
 autoscaler di VPS. Kalau VPS atau autoscaler mati lama, tidak ada yang menghentikan tagihan.
 Workflow di repo ini jalan di runner GitHub tiap 10 menit:
 
-1. `GET https://app.sekalibanyak.com/api/healthz/autoscaler` — 200 hanya bila aplikasi hidup
-   **dan** heartbeat autoscaler masih segar.
+1. `GET https://app.sekalibanyak.com/api/readyz` — 200 bila aplikasi dan database menjawab. Autoscaler
+   yang macet BUKAN alasan bertindak (pod tetap bisa kerja selama aplikasi hidup).
 2. Bila bukan 200: tunggu `OUTAGE_MINUTES` (bawaan 15), cek lagi. Masih bukan 200 → hapus semua pod
    Runpod yang namanya berawalan `POD_NAME_PREFIX` (bawaan `studio-worker-`) dan buka *issue* di repo
    ini (pemilik dapat e-mail).
@@ -26,8 +26,7 @@ jadi watchdog ini hanya **pengaman tambahan**, bukan jaminan. Pemilik memutuskan
 memakai layanan luar (cron-job.org, healthchecks.io). Pengaman utama ada di aplikasi sendiri — lihat
 `docs/RISIKO.md` bagian "Rencana final" di repo `studio-video-ai`.
 Workflow sengaja **tanpa input**: run apa pun hanya bisa *memeriksa*.
-Rencana (PR-2): bertindak hanya bila `/api/readyz` gagal 2× berjarak 15 menit — bukan karena heartbeat
-autoscaler basi (yang sekarang bisa menghapus pod yang sedang kerja).
+Sejak 2026-10-02 (PR-2): hanya bertindak bila `/api/readyz` gagal 2× berjarak 15 menit.
 
 ## Tombol darurat
 Hapus pod langsung di **console Runpod → Pods → Terminate** (atau tombol darurat di aplikasi).
