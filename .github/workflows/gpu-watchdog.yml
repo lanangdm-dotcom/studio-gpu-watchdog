@@ -15,7 +15,7 @@ on:
     - cron: "*/10 * * * *"
     # Second line on different minutes: GitHub delays or skips busy */N slots; two entries
     # make at least one fire per half hour even when the first is skipped.
-    - cron: "3,33 * * * *"
+    - cron: "3,33 * * * *"  # second slot
   # A push run (same probe, never forced) registers the schedule: GitHub's scheduler can stay
   # silent on a new repo until a push-triggered run has happened (manual runs do not count).
   push:
