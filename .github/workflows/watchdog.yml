@@ -13,6 +13,9 @@ name: GPU pod watchdog
 on:
   schedule:
     - cron: "*/10 * * * *"
+    # Second line on different minutes: GitHub delays or skips busy */N slots; two entries
+    # make at least one fire per half hour even when the first is skipped.
+    - cron: "3,33 * * * *"
   workflow_dispatch:
     inputs:
       force:
