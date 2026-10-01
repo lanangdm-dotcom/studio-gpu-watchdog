@@ -24,3 +24,5 @@ saldo habis".
 Actions → *GPU pod watchdog* → *Run workflow* → centang **force** → semua pod dihapus sekarang.
 
 Repo ini publik hanya berisi workflow (tanpa rahasia) karena Actions gratis untuk repo publik.
+
+_Terakhir diperiksa: 2026-10-01._
